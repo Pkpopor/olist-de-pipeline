@@ -1,0 +1,22 @@
+# Environment
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Logs
+logs/
+*.log
+
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/package-lock.yml
+
+# Datasets
+*.csv
+
+# OS
+.DS_Store

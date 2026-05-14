@@ -1,0 +1,91 @@
+version: 2
+
+models:
+  - name: stg_orders
+    description: Cleaned orders with cast timestamps and renamed columns
+    columns:
+      - name: order_id
+        tests:
+          - not_null
+          - unique
+      - name: customer_id
+        tests:
+          - not_null
+      - name: order_status
+        tests:
+          - accepted_values:
+              values: ['delivered', 'shipped', 'approved', 'processing',
+                       'unavailable', 'canceled', 'invoiced', 'created']
+
+  - name: stg_order_items
+    description: Order items with price/freight cast to numeric
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [order_id, order_item_id]
+    columns:
+      - name: order_id
+        tests:
+          - not_null
+      - name: order_item_id
+        tests:
+          - not_null
+
+  - name: stg_customers
+    description: Customers with renamed columns; zip_code_prefix is SHA-256 hashed
+    columns:
+      - name: customer_id
+        tests:
+          - not_null
+          - unique
+
+  - name: stg_products
+    description: Products joined with English category translation
+    columns:
+      - name: product_id
+        tests:
+          - not_null
+          - unique
+
+  - name: stg_sellers
+    description: Sellers with renamed columns; zip_code_prefix is SHA-256 hashed
+    columns:
+      - name: seller_id
+        tests:
+          - not_null
+          - unique
+
+  - name: stg_order_payments
+    description: Payments with payment_value cast to numeric
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [order_id, payment_sequential]
+    columns:
+      - name: order_id
+        tests:
+          - not_null
+      - name: payment_sequential
+        tests:
+          - not_null
+      - name: payment_type
+        tests:
+          - accepted_values:
+              values: ['credit_card', 'boleto', 'voucher', 'debit_card', 'not_defined']
+
+  - name: stg_order_reviews
+    description: Reviews with cast timestamps
+    columns:
+      - name: review_id
+        tests:
+          - not_null
+          - unique
+      - name: order_id
+        tests:
+          - not_null
+
+  - name: stg_geolocation
+    description: Geolocation deduplicated by zip_code_prefix (SHA-256 hashed to match customers/sellers)
+    columns:
+      - name: zip_code_prefix
+        tests:
+          - not_null
+          - unique

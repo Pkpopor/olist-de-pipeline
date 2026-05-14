@@ -1,0 +1,145 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: Date dimension generated from order_purchase_timestamp range
+    columns:
+      - name: date_id
+        tests:
+          - not_null
+          - unique
+      - name: date_day
+        tests:
+          - not_null
+          - unique
+
+  - name: dim_customers
+    description: Customer dimension with geolocation; SCD Type 2 (all current on initial load)
+    columns:
+      - name: customer_key
+        tests:
+          - not_null
+          - unique
+      - name: customer_id
+        tests:
+          - not_null
+
+  - name: dim_sellers
+    description: Seller dimension with geolocation; SCD Type 2 (all current on initial load)
+    columns:
+      - name: seller_key
+        tests:
+          - not_null
+          - unique
+      - name: seller_id
+        tests:
+          - not_null
+
+  - name: dim_products
+    description: Product dimension with English category names
+    columns:
+      - name: product_key
+        tests:
+          - not_null
+          - unique
+      - name: product_id
+        tests:
+          - not_null
+
+  - name: fact_order_items
+    description: Grain — one row per order line item
+    columns:
+      - name: order_item_key
+        tests:
+          - not_null
+          - unique
+      - name: order_id
+        tests:
+          - not_null
+      - name: customer_key
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_customers')
+              field: customer_key
+      - name: seller_key
+        tests:
+          - relationships:
+              to: ref('dim_sellers')
+              field: seller_key
+      - name: product_key
+        tests:
+          - relationships:
+              to: ref('dim_products')
+              field: product_key
+      - name: order_date_id
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_id
+
+  - name: fact_order_payments
+    description: Grain — one row per payment record
+    columns:
+      - name: payment_key
+        tests:
+          - not_null
+          - unique
+      - name: order_id
+        tests:
+          - not_null
+      - name: payment_type
+        tests:
+          - accepted_values:
+              values: ['credit_card', 'boleto', 'voucher', 'debit_card', 'not_defined']
+      - name: customer_key
+        tests:
+          - relationships:
+              to: ref('dim_customers')
+              field: customer_key
+      - name: order_date_id
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_id
+
+  - name: fact_order_reviews
+    description: Grain — one row per review
+    columns:
+      - name: review_id
+        tests:
+          - not_null
+          - unique
+      - name: order_id
+        tests:
+          - not_null
+      - name: review_score
+        tests:
+          - accepted_values:
+              values: [1, 2, 3, 4, 5]
+      - name: customer_key
+        tests:
+          - relationships:
+              to: ref('dim_customers')
+              field: customer_key
+      - name: order_date_id
+        tests:
+          - relationships:
+              to: ref('dim_date')
+              field: date_id
+
+  - name: mart_seller_performance
+    description: Grain — one row per seller; aggregated order, revenue, review, and delivery metrics
+    columns:
+      - name: seller_id
+        tests:
+          - not_null
+          - unique
+
+  - name: mart_monthly_revenue
+    description: Grain — one row per calendar month; aggregated revenue, volume, review, and payment metrics
+    columns:
+      - name: year_month_key
+        tests:
+          - not_null
+          - unique

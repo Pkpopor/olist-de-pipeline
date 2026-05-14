@@ -1,0 +1,12 @@
+olist_pipeline:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host:     "{{ env_var('PIPELINE_DB_HOST', 'localhost') }}"
+      port:     "{{ env_var('PIPELINE_DB_PORT', '5433') | int }}"
+      user:     "{{ env_var('PIPELINE_DB_USER', 'pipeline_user') }}"
+      password: "{{ env_var('PIPELINE_DB_PASSWORD', 'pipeline_password') }}"
+      dbname:   raw
+      schema:   public
+      threads:  4
