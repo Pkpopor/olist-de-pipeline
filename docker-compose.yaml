@@ -89,6 +89,7 @@ x-airflow-common:
     - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
     - ${AIRFLOW_PROJ_DIR:-.}/ingest:/opt/airflow/ingest
     - ${AIRFLOW_PROJ_DIR:-.}/dbt:/opt/airflow/dbt
+    - ${AIRFLOW_PROJ_DIR:-.}:/opt/airflow/data
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on

@@ -25,7 +25,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-CSV_DIR = Path(os.getenv("CSV_DIR", PROJECT_ROOT))
+CSV_DIR = Path(os.getenv("DATA_DIR", "/opt/airflow/data"))
 
 _DDL = """
 CREATE SCHEMA IF NOT EXISTS raw;
