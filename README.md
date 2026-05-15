@@ -7,15 +7,14 @@ A production-style Medallion data pipeline built on the [Olist](https://www.kagg
 ## Table of Contents
 
 1. [Project Overview](#1-project-overview)
-2. [Architecture](#2-architecture)
-3. [Star Schema](#3-star-schema)
-4. [Data Quality](#4-data-quality)
-5. [Design Decisions](#5-design-decisions)
-6. [Pipeline Validation Results](#6-pipeline-validation-results)
+2. [Tech Stack](#2-tech-stack)
+3. [Architecture](#3-architecture)
+4. [Star Schema](#4-star-schema)
+5. [Data Quality](#5-data-quality)
+6. [Design Decisions](#6-design-decisions)
 7. [Quick Start](#7-quick-start)
 8. [Project Structure](#8-project-structure)
-9. [Environment Variables](#9-environment-variables)
-10. [Known Limitations](#10-known-limitations)
+9. [Known Limitations](#9-known-limitations)
 
 ---
 
@@ -38,7 +37,20 @@ This project ingests nine CSV files from the Olist Brazilian e-commerce dataset,
 
 ---
 
-## 2. Architecture
+## 2. Tech Stack
+
+| Tool | Version |
+|---|---|
+| Apache Airflow | 3.1.7 |
+| dbt-postgres | 1.9.0 |
+| dbt_utils | 1.3.3 |
+| PostgreSQL | 16 |
+| Docker Compose | v2 |
+| Python | 3.12 |
+
+---
+
+## 3. Architecture
 
 ```mermaid
 flowchart LR
@@ -95,9 +107,39 @@ flowchart LR
 ingest_raw  →  validate_quarantine  →  dbt_staging  →  dbt_mart
 ```
 
+### Layer descriptions
+
+**Raw layer**
+`ingest_raw` reads each CSV with pandas, validates every row against a `TableContract` (column names, dtypes, nullability, PII flags), and writes results to PostgreSQL. Valid rows land in the nine `raw.*` tables unchanged. Rows that fail any check are diverted to `raw.quarantine` with a human-readable reason. Every file's row counts and status are recorded in `raw.ingestion_log` for reconciliation.
+
+**Staging layer**
+`dbt_staging` runs eight `stg_*` views. Each view casts columns to the correct type, renames columns to a consistent convention, and joins `product_category_name_translation` to add English category labels. The geolocation model deduplicates by zip code prefix. Views are zero-cost — no data is copied; every query reads directly from the raw tables.
+
+**Data Mart**
+`dbt_mart` materialises the star schema as physical tables: four dimension tables (`dim_customers`, `dim_sellers`, `dim_products`, `dim_date`) and three fact tables (`fact_order_items`, `fact_order_payments`, `fact_order_reviews`), plus two pre-aggregated mart tables (`mart_monthly_revenue`, `mart_seller_performance`) for common analytical queries.
+
+### Airflow DAG tasks
+
+| Task | Type | Responsibility |
+|---|---|---|
+| `ingest_raw` | `BashOperator` | Runs `ingest.py`; loads all nine CSVs into `raw.*` tables |
+| `validate_quarantine` | `PythonOperator` | Queries `raw.quarantine` for the current run; raises `AirflowException` if the quarantine rate exceeds `QUARANTINE_THRESHOLD_PCT` |
+| `dbt_staging` | `BashOperator` | Runs `dbt run --select staging` then `dbt test --select staging` |
+| `dbt_mart` | `BashOperator` | Runs `dbt run --select marts` then `dbt test --select marts` |
+
+### Why each tool
+
+| Tool | Reason |
+|---|---|
+| **Apache Airflow** | Industry-standard DAG orchestrator with a rich UI, built-in retry/alerting, and CeleryExecutor for parallel task execution |
+| **dbt** | Version-controlled, testable SQL with automatic lineage via `ref()`. Views for staging = zero storage overhead; tables for marts = predictable query performance |
+| **PostgreSQL** | Reliable, feature-complete open-source RDBMS with `ON CONFLICT` support for idempotent upserts and JSONB for quarantine storage |
+| **Docker Compose** | Reproducible local environment: single command brings up all services with correct networking and volume mounts |
+| **Python / pandas** | Flexible CSV parsing with `contracts.py`-driven validation, SHA-256 PII hashing, and psycopg2 bulk inserts via `execute_values` |
+
 ---
 
-## 3. Star Schema
+## 4. Star Schema
 
 ```mermaid
 erDiagram
@@ -207,7 +249,7 @@ erDiagram
 
 ---
 
-## 4. Data Quality
+## 5. Data Quality
 
 ### Contract validation
 `ingest/contracts.py` defines a `TableContract` per source file specifying column name, dtype (`str | int | float | datetime`), and nullability. Every row is cast and checked before it reaches the database.
@@ -234,7 +276,7 @@ All `INSERT` statements use `ON CONFLICT (primary_key) DO NOTHING`. Re-running t
 
 ---
 
-## 5. Design Decisions
+## 6. Design Decisions
 
 ### Why Medallion (Raw → Staging → Mart)?
 Each layer has a single responsibility. Raw preserves the source exactly (plus audit metadata). Staging normalises and types. Mart builds analytics-optimised structures. This makes it cheap to re-derive any layer without re-ingesting from source, and easy to debug failures at a specific layer.
@@ -254,88 +296,22 @@ dbt gives us version-controlled, testable SQL, automatic lineage, and the `ref()
 
 ---
 
-## 6. Pipeline Validation Results
-
-| Check | Result |
-|---|---|
-| Raw row counts match CSV totals | Pass — reconciled via `raw.ingestion_log` |
-| Quarantine rate | < 5 % across all 9 source tables |
-| dbt schema tests | **59 / 59 passed** (not_null, unique, accepted_values, relationships) |
-| FK unmatched rows | **0** — all fact foreign keys resolve to a dimension key |
-| Average order delivery time | **12.47 days** (purchase → delivered to customer) |
-
----
-
 ## 7. Quick Start
 
 ### Prerequisites
 - Docker Desktop (≥ 4.x) with at least 4 GB RAM allocated
 - Docker Compose v2
-- Python 3.12+ (only for running ingest locally outside Docker)
 
-### 1. Clone the repository
+### Steps
 
 ```bash
 git clone <repo-url>
 cd "Final Project Data arc"
-```
-
-### 2. Configure environment
-
-Copy or edit `.env` at the project root:
-
-```bash
-# .env
-AIRFLOW_UID=50000
-
-PIPELINE_DB_USER=pipeline_user
-PIPELINE_DB_PASSWORD=pipeline_password
-PIPELINE_DB_HOST=localhost
-PIPELINE_DB_PORT=5433
-PIPELINE_DB_NAME=raw
-
-QUARANTINE_THRESHOLD_PCT=5.0
-```
-
-### 3. Start all services
-
-```bash
+cp .env.example .env
 docker compose up -d
 ```
 
-Wait until `airflow-apiserver` is healthy (≈ 60–90 s):
-
-```bash
-docker compose ps
-```
-
-The Airflow UI is available at **http://localhost:8080** (default credentials: `airflow` / `airflow`).
-
-### 4. Run ingest (first time)
-
-The ingest script can be run directly (outside Airflow) to populate the Raw layer:
-
-```bash
-# activate your virtual environment first
-pip install -r ingest/requirements.txt
-python ingest/ingest.py
-```
-
-Or trigger via the DAG (step 5 will do this automatically).
-
-### 5. Trigger the DAG
-
-In the Airflow UI, unpause and manually trigger **`olist_pipeline`**, or use the CLI:
-
-```bash
-docker compose exec airflow-apiserver airflow dags trigger olist_pipeline
-```
-
-The four tasks run in sequence:
-
-```
-ingest_raw → validate_quarantine → dbt_staging → dbt_mart
-```
+Open **http://localhost:8080** (default credentials: `airflow` / `airflow`), unpause and manually trigger the **`olist_pipeline`** DAG.
 
 ---
 
@@ -369,23 +345,7 @@ ingest_raw → validate_quarantine → dbt_staging → dbt_mart
 
 ---
 
-## 9. Environment Variables
-
-| Variable | Default | Description |
-|---|---|---|
-| `AIRFLOW_UID` | `50000` | UID for Airflow container processes |
-| `PIPELINE_DB_USER` | `pipeline_user` | PostgreSQL user for the pipeline database |
-| `PIPELINE_DB_PASSWORD` | `pipeline_password` | PostgreSQL password |
-| `PIPELINE_DB_HOST` | `localhost` | Host when connecting from outside Docker (`pipeline_db` inside Docker) |
-| `PIPELINE_DB_PORT` | `5433` | Exposed port of the `pipeline_db` container |
-| `PIPELINE_DB_NAME` | `raw` | Database name (Raw schema lives here; Staging and Mart are separate databases) |
-| `QUARANTINE_THRESHOLD_PCT` | `5.0` | DAG aborts if quarantine rate exceeds this percentage |
-| `_AIRFLOW_WWW_USER_USERNAME` | `airflow` | Airflow UI admin username |
-| `_AIRFLOW_WWW_USER_PASSWORD` | `airflow` | Airflow UI admin password |
-
----
-
-## 10. Known Limitations
+## 9. Known Limitations
 
 - **SCD Type 2 updates not implemented** — `dim_customers` and `dim_sellers` have the `valid_from / valid_to / is_current` columns, but the current pipeline always inserts a fresh current record rather than closing the previous one. Full SCD Type 2 requires a snapshot strategy (e.g. `dbt snapshot`).
 - **Batch-only ingest** — the pipeline reads full CSV files on every run. There is no incremental extraction from a source system; re-running against updated CSVs will not insert duplicate rows (idempotency is guaranteed), but deleted rows in the source are not handled.
